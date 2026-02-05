@@ -34,7 +34,7 @@ async def start_command(message: Message, state: FSMContext, db: Database) -> No
 
     await state.clear()
     await state.set_state(Onboarding.full_name)
-    await message.answer("Введите Фамилию и Имя (например: Яковлев Елисей).")
+    await message.answer("Введите Имя и Фамилию (например: Елисей Яковлев).")
 
 
 @router.message(StateFilter(Onboarding.full_name))
@@ -47,12 +47,12 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
     expected_full_name = _extract_expected_full_name(text)
     if expected_full_name is None:
         await message.answer(
-            "Нужно указать фамилию и имя (например: Яковлев Елисей)."
+            "Нужно указать имя и фамилию (например: Елисей Яковлев)."
         )
         return
 
     expected_last_name, expected_first_name = expected_full_name.split(" ", maxsplit=1)
-    fiitbot_query = f"@fiitbot {expected_last_name} {expected_first_name}"
+    fiitbot_query = f"@fiitobot {expected_first_name} {expected_last_name}"
     await state.update_data(
         expected_last_name=expected_last_name,
         expected_first_name=expected_first_name,
@@ -115,7 +115,7 @@ async def handle_fiitobot_response(message: Message, state: FSMContext, db: Data
 
 
 def _extract_expected_full_name(text: str) -> str | None:
-    """Parse user input as 'Фамилия Имя' and normalize it."""
+    """Parse user input as 'Имя Фамилия' and normalize to 'Фамилия Имя'."""
     normalized_text = " ".join(text.strip().split())
     if not normalized_text:
         return None
@@ -124,8 +124,8 @@ def _extract_expected_full_name(text: str) -> str | None:
     if len(parts) != 2:
         return None
 
-    last_name = _normalize_name_token(parts[0])
-    first_name = _normalize_name_token(parts[1])
+    first_name = _normalize_name_token(parts[0])
+    last_name = _normalize_name_token(parts[1])
     if not first_name or not last_name:
         return None
 

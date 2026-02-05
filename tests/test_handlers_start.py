@@ -35,13 +35,13 @@ def test_start_command_new_user_prompts_full_name() -> None:
     asyncio.run(start_handlers.start_command(message, state, db))
 
     assert state.state == Onboarding.full_name
-    assert message.answers[-1][0].startswith("Введите Фамилию и Имя")
+    assert message.answers[-1][0].startswith("Введите Имя и Фамилию")
 
 
 def test_handle_full_name_moves_to_waiting_fiitobot_response() -> None:
     users = FakeCollection("users", docs=[])
     db = FakeDB({"users": users})
-    message = FakeMessage(from_user=FakeUser(42), text="Яковлев Елисей")
+    message = FakeMessage(from_user=FakeUser(42), text="Елисей Яковлев")
     state = FakeFSMContext(state=Onboarding.full_name)
 
     asyncio.run(start_handlers.handle_full_name(message, state, db))
@@ -49,7 +49,7 @@ def test_handle_full_name_moves_to_waiting_fiitobot_response() -> None:
     assert state.state == Onboarding.wait_fiitobot_response
     assert state.data["expected_last_name"] == "Яковлев"
     assert state.data["expected_first_name"] == "Елисей"
-    assert message.answers[-2][0] == "@fiitbot Яковлев Елисей"
+    assert message.answers[-2][0] == "@fiitobot Елисей Яковлев"
     assert message.answers[-1][0].startswith("Запрос сформирован.")
 
 
@@ -63,7 +63,7 @@ def test_handle_full_name_rejects_invalid_name() -> None:
 
     assert state.state == Onboarding.full_name
     assert users.docs == []
-    assert "Нужно указать фамилию и имя" in message.answers[-1][0]
+    assert "Нужно указать имя и фамилию" in message.answers[-1][0]
 
 
 def test_handle_fiitobot_response_parses_card_and_upserts_user() -> None:
