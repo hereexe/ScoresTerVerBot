@@ -1,8 +1,14 @@
-"""FSM state definitions (stubs)."""
+"""FSM state definitions.
+
+This module intentionally contains only state definitions (no business logic).
+"""
 
 from __future__ import annotations
 
 from aiogram.fsm.state import State, StatesGroup
+
+
+__all__ = ["Onboarding", "AddLecture", "AddPoints", "Stats"]
 
 
 class Onboarding(StatesGroup):
