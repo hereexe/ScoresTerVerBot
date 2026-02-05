@@ -59,7 +59,6 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
     )
     await state.set_state(Onboarding.wait_fiitobot_response)
     await message.answer(fiitbot_query)
-    await message.answer("Запрос сформирован. Отправьте его в чат @fiitbot и пришлите сюда ответ с карточкой.")
 
 
 @router.message(StateFilter(Onboarding.wait_fiitobot_response))
