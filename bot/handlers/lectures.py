@@ -29,6 +29,7 @@ async def add_lecture_command(
         await message.answer("Недостаточно прав для добавления лекций.")
         return
 
+    await state.clear()
     await state.set_state(AddLecture.date_label)
     await message.answer(
         "Введите дату лекции в формате DD.MM.YYYY (например, 31.10.2025).",

@@ -17,3 +17,7 @@ class AddPoints(StatesGroup):
     lecture_id = State()
     activity_type = State()
     value = State()
+
+
+class Stats(StatesGroup):
+    lecture_id = State()
