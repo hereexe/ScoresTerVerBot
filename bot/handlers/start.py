@@ -52,13 +52,14 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
         return
 
     expected_last_name, expected_first_name = expected_full_name.split(" ", maxsplit=1)
-    fiitbot_query = f"@fiitobot {expected_first_name} {expected_last_name}"
+    fiitbot_query = _build_fiitbot_query(f"{expected_first_name} {expected_last_name}")
     await state.update_data(
         expected_last_name=expected_last_name,
         expected_first_name=expected_first_name,
+        fiitbot_query=fiitbot_query,
     )
     await state.set_state(Onboarding.wait_fiitobot_response)
-    await message.answer(fiitbot_query)
+    await message.answer("Запрос авторизации принят. Ожидаю ответ от @fiitobot с карточкой пользователя.")
 
 
 @router.message(StateFilter(Onboarding.wait_fiitobot_response))
@@ -171,6 +172,11 @@ def _extract_full_name_from_fiitobot(text: str) -> str | None:
 
 def _normalize_name_token(value: str) -> str:
     return " ".join(value.strip().strip(".,").split())
+
+
+def _build_fiitbot_query(value: str) -> str:
+    normalized = " ".join(value.strip().split())
+    return f"@fiitobot {normalized}"
 
 
 def _same_person(
