@@ -19,7 +19,7 @@ _NAME_TOKEN_RE = re.compile(r"^[A-Za-zА-Яа-яЁё-]{2,}$")
 
 @router.message(CommandStart())
 async def start_command(message: Message, state: FSMContext, db: Database) -> None:
-    """Handle /start: require @fiitobot verification for new users."""
+    """Handle /start: onboard new users via @fiitobot flow."""
     if message.from_user is None:
         return
 
@@ -33,14 +33,39 @@ async def start_command(message: Message, state: FSMContext, db: Database) -> No
 
     await state.clear()
     await state.set_state(Onboarding.full_name)
-    await message.answer(
-        "Для авторизации отправьте запрос в формате '@fiitobot Имя Фамилия' и пришлите сюда найденную карточку."
-    )
+    await message.answer("Введите Имя и Фамилию (например: Иван Иванов).")
 
 
 @router.message(StateFilter(Onboarding.full_name))
 async def handle_full_name(message: Message, state: FSMContext, db: Database) -> None:
-    """Handle @fiitobot verification text and register user."""
+    """Handle name input and switch to waiting @fiitobot response."""
+    if message.from_user is None:
+        return
+
+    text = message.text or ""
+    expected_full_name = _extract_expected_full_name(text)
+    if expected_full_name is None:
+        await message.answer(
+            "Нужно указать имя и фамилию (например: Иван Иванов)."
+        )
+        return
+
+    expected_last_name, expected_first_name = expected_full_name.split(" ", maxsplit=1)
+    await state.update_data(
+        expected_last_name=expected_last_name,
+        expected_first_name=expected_first_name,
+    )
+    await state.set_state(Onboarding.wait_fiitobot_response)
+    await message.answer(
+        "Теперь отправьте в @fiitobot запрос "
+        f"'@fiitobot {expected_first_name} {expected_last_name}' "
+        "и пришлите сюда ответ с карточкой."
+    )
+
+
+@router.message(StateFilter(Onboarding.wait_fiitobot_response))
+async def handle_fiitobot_response(message: Message, state: FSMContext, db: Database) -> None:
+    """Handle copied @fiitobot response and register user."""
     if message.from_user is None:
         return
 
@@ -49,7 +74,23 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
     if full_name is None:
         await message.answer(
             "Не удалось подтвердить пользователя. "
-            "Повторите авторизацию: '@fiitobot Имя Фамилия' и отправьте найденную карточку."
+            "Повторите запрос в @fiitobot и отправьте найденную карточку."
+        )
+        return
+
+    data = await state.get_data()
+    expected_last_name = _normalize_name_token(str(data.get("expected_last_name") or ""))
+    expected_first_name = _normalize_name_token(str(data.get("expected_first_name") or ""))
+    actual_last_name, actual_first_name = full_name.split(" ", maxsplit=1)
+    if not _same_person(
+        expected_last_name=expected_last_name,
+        expected_first_name=expected_first_name,
+        actual_last_name=actual_last_name,
+        actual_first_name=actual_first_name,
+    ):
+        await message.answer(
+            "Полученная карточка не совпадает с введенными Имя Фамилией. "
+            "Отправьте ответ от @fiitobot именно для вашего запроса."
         )
         return
 
@@ -72,6 +113,29 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
 
     await state.clear()
     await message.answer(f"Готово! Вы авторизованы как {full_name}.", reply_markup=main_menu_keyboard())
+
+
+def _extract_expected_full_name(text: str) -> str | None:
+    """Parse user input as 'Имя Фамилия' and normalize to 'Фамилия Имя'."""
+    normalized_text = " ".join(text.strip().split())
+    if not normalized_text:
+        return None
+
+    parts = [p for p in normalized_text.split(" ") if p]
+    if len(parts) != 2:
+        return None
+
+    first_name = _normalize_name_token(parts[0])
+    last_name = _normalize_name_token(parts[1])
+    if not first_name or not last_name:
+        return None
+
+    if not _NAME_TOKEN_RE.fullmatch(first_name):
+        return None
+    if not _NAME_TOKEN_RE.fullmatch(last_name):
+        return None
+
+    return f"{last_name} {first_name}"
 
 
 def _extract_full_name_from_fiitobot(text: str) -> str | None:
@@ -108,6 +172,19 @@ def _extract_full_name_from_fiitobot(text: str) -> str | None:
 
 def _normalize_name_token(value: str) -> str:
     return " ".join(value.strip().strip(".,").split())
+
+
+def _same_person(
+    *,
+    expected_last_name: str,
+    expected_first_name: str,
+    actual_last_name: str,
+    actual_first_name: str,
+) -> bool:
+    return (
+        expected_last_name.casefold() == actual_last_name.casefold()
+        and expected_first_name.casefold() == actual_first_name.casefold()
+    )
 
 
 def _first_non_empty_line(text: str) -> str | None:

@@ -13,6 +13,7 @@ __all__ = ["Onboarding", "AddLecture", "AddPoints", "Stats"]
 
 class Onboarding(StatesGroup):
     full_name = State()
+    wait_fiitobot_response = State()
 
 
 class AddLecture(StatesGroup):
