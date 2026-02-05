@@ -35,21 +35,22 @@ def test_start_command_new_user_prompts_full_name() -> None:
     asyncio.run(start_handlers.start_command(message, state, db))
 
     assert state.state == Onboarding.full_name
-    assert message.answers[-1][0].startswith("Введите Имя и Фамилию")
+    assert message.answers[-1][0].startswith("Введите Фамилию и Имя")
 
 
 def test_handle_full_name_moves_to_waiting_fiitobot_response() -> None:
     users = FakeCollection("users", docs=[])
     db = FakeDB({"users": users})
-    message = FakeMessage(from_user=FakeUser(42), text="Иван Иванов")
+    message = FakeMessage(from_user=FakeUser(42), text="Яковлев Елисей")
     state = FakeFSMContext(state=Onboarding.full_name)
 
     asyncio.run(start_handlers.handle_full_name(message, state, db))
 
     assert state.state == Onboarding.wait_fiitobot_response
-    assert state.data["expected_last_name"] == "Иванов"
-    assert state.data["expected_first_name"] == "Иван"
-    assert message.answers[-1][0].startswith("Теперь отправьте в @fiitobot запрос")
+    assert state.data["expected_last_name"] == "Яковлев"
+    assert state.data["expected_first_name"] == "Елисей"
+    assert message.answers[-2][0] == "@fiitbot Яковлев Елисей"
+    assert message.answers[-1][0].startswith("Запрос сформирован.")
 
 
 def test_handle_full_name_rejects_invalid_name() -> None:
@@ -62,14 +63,14 @@ def test_handle_full_name_rejects_invalid_name() -> None:
 
     assert state.state == Onboarding.full_name
     assert users.docs == []
-    assert "Нужно указать имя и фамилию" in message.answers[-1][0]
+    assert "Нужно указать фамилию и имя" in message.answers[-1][0]
 
 
 def test_handle_fiitobot_response_parses_card_and_upserts_user() -> None:
     users = FakeCollection("users", docs=[])
     db = FakeDB({"users": users})
     text = (
-        "Козлов Иван Александрович\n"
+        "Яковлев Елисей Евгеньевич\n"
         "МЕН-240802\n"
         "ФТ-202-2 (год поступления: 2024)\n"
         "🏫 Школа: 68\n"
@@ -77,19 +78,19 @@ def test_handle_fiitobot_response_parses_card_and_upserts_user() -> None:
     message = FakeMessage(from_user=FakeUser(77), text=text)
     state = FakeFSMContext(
         state=Onboarding.wait_fiitobot_response,
-        data={"expected_last_name": "Козлов", "expected_first_name": "Иван"},
+        data={"expected_last_name": "Яковлев", "expected_first_name": "Елисей"},
     )
 
     asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
 
     assert state.state is None
     assert state.data == {}
-    assert message.answers[-1][0] == "Готово! Вы авторизованы как Козлов Иван."
+    assert message.answers[-1][0] == "Готово! Вы авторизованы как Яковлев Елисей."
     assert any(
         d.get("tg_id") == 77
-        and d.get("full_name") == "Козлов Иван"
-        and d.get("last_name") == "Козлов"
-        and d.get("first_name") == "Иван"
+        and d.get("full_name") == "Яковлев Елисей"
+        and d.get("last_name") == "Яковлев"
+        and d.get("first_name") == "Елисей"
         and d.get("verified_via") == "fiitobot"
         for d in users.docs
     )
@@ -105,7 +106,7 @@ def test_handle_fiitobot_response_rejects_not_found_response() -> None:
     message = FakeMessage(from_user=FakeUser(88), text=text)
     state = FakeFSMContext(
         state=Onboarding.wait_fiitobot_response,
-        data={"expected_last_name": "Козлов", "expected_first_name": "Иван"},
+        data={"expected_last_name": "Яковлев", "expected_first_name": "Елисей"},
     )
 
     asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
@@ -125,7 +126,7 @@ def test_handle_fiitobot_response_rejects_mismatch_with_entered_name() -> None:
     message = FakeMessage(from_user=FakeUser(89), text=text)
     state = FakeFSMContext(
         state=Onboarding.wait_fiitobot_response,
-        data={"expected_last_name": "Козлов", "expected_first_name": "Иван"},
+        data={"expected_last_name": "Яковлев", "expected_first_name": "Елисей"},
     )
 
     asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
@@ -133,4 +134,3 @@ def test_handle_fiitobot_response_rejects_mismatch_with_entered_name() -> None:
     assert state.state == Onboarding.wait_fiitobot_response
     assert users.docs == []
     assert "не совпадает с введенными" in message.answers[-1][0]
-
