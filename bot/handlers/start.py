@@ -34,12 +34,15 @@ async def start_command(message: Message, state: FSMContext, db: Database) -> No
 
     await state.clear()
     await state.set_state(Onboarding.full_name)
-    await message.answer("Введите Имя и Фамилию (например: Елисей Яковлев).")
+    await message.answer(
+        "Для авторизации отправьте запрос в формате '@fiitobot Имя Фамилия' "
+        "и затем пришлите карточку от @fiitobot."
+    )
 
 
 @router.message(StateFilter(Onboarding.full_name))
 async def handle_full_name(message: Message, state: FSMContext, db: Database) -> None:
-    """Handle name input and switch to waiting @fiitobot response."""
+    """Handle query input and switch to waiting @fiitobot response."""
     if message.from_user is None:
         return
 
@@ -47,7 +50,7 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
     expected_full_name = _extract_expected_full_name(text)
     if expected_full_name is None:
         await message.answer(
-            "Нужно указать имя и фамилию (например: Елисей Яковлев)."
+            "Нужно отправить запрос строго в формате '@fiitobot Имя Фамилия'."
         )
         return
 
@@ -59,7 +62,7 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
         fiitbot_query=fiitbot_query,
     )
     await state.set_state(Onboarding.wait_fiitobot_response)
-    await message.answer("Запрос авторизации принят. Ожидаю ответ от @fiitobot с карточкой пользователя.")
+    await message.answer("Запрос принят. Теперь пришлите карточку-ответ от @fiitobot.")
 
 
 @router.message(StateFilter(Onboarding.wait_fiitobot_response))
@@ -115,17 +118,21 @@ async def handle_fiitobot_response(message: Message, state: FSMContext, db: Data
 
 
 def _extract_expected_full_name(text: str) -> str | None:
-    """Parse user input as 'Имя Фамилия' and normalize to 'Фамилия Имя'."""
+    """Parse user input as '@fiitobot Имя Фамилия' and normalize to 'Фамилия Имя'."""
     normalized_text = " ".join(text.strip().split())
     if not normalized_text:
         return None
 
     parts = [p for p in normalized_text.split(" ") if p]
-    if len(parts) != 2:
+    if len(parts) != 3:
         return None
 
-    first_name = _normalize_name_token(parts[0])
-    last_name = _normalize_name_token(parts[1])
+    handle = parts[0].casefold()
+    if handle not in {h.casefold() for h in _FIITBOT_HANDLES}:
+        return None
+
+    first_name = _normalize_name_token(parts[1])
+    last_name = _normalize_name_token(parts[2])
     if not first_name or not last_name:
         return None
 
