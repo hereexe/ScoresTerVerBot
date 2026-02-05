@@ -17,6 +17,8 @@ ActivityType = Literal["questions", "typo", "professor"]
 class UserDoc:
     tg_id: int
     full_name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     id: Optional[str] = None
 
 
