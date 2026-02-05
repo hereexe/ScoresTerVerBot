@@ -37,10 +37,41 @@ class ActivityDoc:
 
 
 def validate_date_label(date_label: str) -> None:
-    """Validate lecture date label format (e.g. DD.MM.YYYY). TODO: implement."""
-    raise NotImplementedError
+    """Validate lecture date label format (e.g. DD.MM.YYYY).
+
+    Raises:
+        ValueError: when date_label is invalid.
+    """
+    raw = date_label.strip()
+    if not raw:
+        raise ValueError("date_label is empty")
+
+    try:
+        dt = datetime.strptime(raw, "%d.%m.%Y")
+    except ValueError as e:
+        raise ValueError("date_label must be in format DD.MM.YYYY") from e
+
+    # Round-trip check (normalization safety).
+    if dt.strftime("%d.%m.%Y") != raw:
+        raise ValueError("date_label must be in normalized format DD.MM.YYYY")
 
 
 def validate_points(value: float) -> None:
-    """Validate points value constraints. TODO: implement."""
-    raise NotImplementedError
+    """Validate points value constraints.
+
+    Policy (can be adjusted later):
+    - Must be finite
+    - Must be > 0
+    - Must be <= 10
+
+    Raises:
+        ValueError: when value is invalid.
+    """
+    if value != value:  # NaN
+        raise ValueError("points must be a finite number")
+    if value in (float("inf"), float("-inf")):
+        raise ValueError("points must be a finite number")
+    if value <= 0:
+        raise ValueError("points must be > 0")
+    if value > 10:
+        raise ValueError("points must be <= 10")
