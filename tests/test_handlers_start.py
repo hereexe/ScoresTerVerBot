@@ -94,6 +94,33 @@ def test_handle_full_name_rejects_missing_fiitobot_prefix() -> None:
     assert "Нужно отправить запрос строго в формате '@fiitobot Имя Фамилия'" in message.answers[-1][0]
 
 
+def test_handle_full_name_accepts_fiitobot_card_without_query() -> None:
+    users = FakeCollection("users", docs=[])
+    db = FakeDB({"users": users})
+    text = (
+        "*via @fiitobot*\n"
+        "**Ваулин Мефодий Дмитриевич**\n"
+        "МЕН-240802\n"
+        "ФТ-202-2 (год поступления: 2024)\n"
+    )
+    message = FakeMessage(from_user=FakeUser(55), text=text)
+    state = FakeFSMContext(state=Onboarding.full_name)
+
+    asyncio.run(start_handlers.handle_full_name(message, state, db))
+
+    assert state.state is None
+    assert state.data == {}
+    assert message.answers[-1][0] == "Готово! Вы авторизованы как Ваулин Мефодий."
+    assert any(
+        d.get("tg_id") == 55
+        and d.get("full_name") == "Ваулин Мефодий"
+        and d.get("last_name") == "Ваулин"
+        and d.get("first_name") == "Мефодий"
+        and d.get("verified_via") == "fiitobot"
+        for d in users.docs
+    )
+
+
 def test_handle_fiitobot_response_parses_card_and_upserts_user() -> None:
     users = FakeCollection("users", docs=[])
     db = FakeDB({"users": users})

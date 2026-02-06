@@ -47,6 +47,17 @@ async def handle_full_name(message: Message, state: FSMContext, db: Database) ->
         return
 
     text = message.text or ""
+    if "fiitobot" in text.casefold():
+        full_name_from_card = _extract_full_name_from_fiitobot(text)
+        if full_name_from_card is not None:
+            await _register_user(db, tg_id=message.from_user.id, full_name=full_name_from_card)
+            await state.clear()
+            await message.answer(
+                f"Готово! Вы авторизованы как {full_name_from_card}.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
     expected_full_name = _extract_expected_full_name(text)
     if expected_full_name is None:
         await message.answer(
@@ -98,12 +109,22 @@ async def handle_fiitobot_response(message: Message, state: FSMContext, db: Data
 
     last_name, first_name = full_name.split(" ", maxsplit=1)
 
+    await _register_user(db, tg_id=message.from_user.id, full_name=full_name)
+
+    await state.clear()
+    await message.answer(f"Готово! Вы авторизованы как {full_name}.", reply_markup=main_menu_keyboard())
+
+
+async def _register_user(db: Database, *, tg_id: int, full_name: str) -> None:
+    """Persist user profile after successful verification."""
+    last_name, first_name = full_name.split(" ", maxsplit=1)
+
     users = _users_collection(db)
     await users.update_one(
-        {"tg_id": message.from_user.id},
+        {"tg_id": tg_id},
         {
             "$set": {
-                "tg_id": message.from_user.id,
+                "tg_id": tg_id,
                 "first_name": first_name,
                 "last_name": last_name,
                 "full_name": full_name,
@@ -112,9 +133,6 @@ async def handle_fiitobot_response(message: Message, state: FSMContext, db: Data
         },
         upsert=True,
     )
-
-    await state.clear()
-    await message.answer(f"Готово! Вы авторизованы как {full_name}.", reply_markup=main_menu_keyboard())
 
 
 def _extract_expected_full_name(text: str) -> str | None:
@@ -152,33 +170,29 @@ def _extract_full_name_from_fiitobot(text: str) -> str | None:
     if _NOT_FOUND_TEXT.lower() in normalized_text.lower():
         return None
 
-    first_line = _first_non_empty_line(normalized_text)
-    if first_line is None:
-        return None
+    for line in _candidate_lines(normalized_text):
+        parts = [p for p in line.split(" ") if p]
+        if len(parts) < 2:
+            continue
 
-    lowered_first_line = first_line.lower()
-    if any(lowered_first_line.startswith(handle) for handle in _FIITBOT_HANDLES):
-        return None
+        last_name = _normalize_name_token(parts[0])
+        first_name = _normalize_name_token(parts[1])
+        if not last_name or not first_name:
+            continue
 
-    parts = [p for p in first_line.split(" ") if p]
-    if len(parts) < 2:
-        return None
+        if not _NAME_TOKEN_RE.fullmatch(last_name):
+            continue
+        if not _NAME_TOKEN_RE.fullmatch(first_name):
+            continue
 
-    last_name = _normalize_name_token(parts[0])
-    first_name = _normalize_name_token(parts[1])
-    if not last_name or not first_name:
-        return None
+        return f"{last_name} {first_name}"
 
-    if not _NAME_TOKEN_RE.fullmatch(last_name):
-        return None
-    if not _NAME_TOKEN_RE.fullmatch(first_name):
-        return None
-
-    return f"{last_name} {first_name}"
+    return None
 
 
 def _normalize_name_token(value: str) -> str:
-    return " ".join(value.strip().strip(".,").split())
+    cleaned = " ".join(value.strip().split())
+    return cleaned.strip(".,*_>-—")
 
 
 def _build_fiitbot_query(value: str) -> str:
@@ -199,12 +213,20 @@ def _same_person(
     )
 
 
-def _first_non_empty_line(text: str) -> str | None:
+def _candidate_lines(text: str) -> list[str]:
+    candidates: list[str] = []
     for line in text.splitlines():
         candidate = " ".join(line.strip().split())
-        if candidate:
-            return candidate
-    return None
+        if not candidate:
+            continue
+        candidate = candidate.strip("*_>•-—").strip()
+        if not candidate:
+            continue
+        lowered = candidate.casefold()
+        if any(handle in lowered for handle in _FIITBOT_HANDLES):
+            continue
+        candidates.append(candidate)
+    return candidates
 
 
 def _users_collection(db: Database):
