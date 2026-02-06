@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -33,84 +33,52 @@ async def start_command(message: Message, state: FSMContext, db: Database) -> No
         return
 
     await state.clear()
-    await state.set_state(Onboarding.full_name)
-    await message.answer(
-        "Для авторизации отправьте запрос в формате '@fiitobot Имя Фамилия' "
-        "и затем пришлите карточку от @fiitobot."
-    )
+    await state.set_state(Onboarding.wait_fiitobot_response)
+    await message.answer("Пришлите карточку из @fiitobot (скопируйте сообщение целиком).")
 
 
 @router.message(StateFilter(Onboarding.full_name))
 async def handle_full_name(message: Message, state: FSMContext, db: Database) -> None:
-    """Handle query input and switch to waiting @fiitobot response."""
-    if message.from_user is None:
-        return
-
-    text = message.text or ""
-    if "fiitobot" in text.casefold():
-        full_name_from_card = _extract_full_name_from_fiitobot(text)
-        if full_name_from_card is not None:
-            await _register_user(db, tg_id=message.from_user.id, full_name=full_name_from_card)
-            await state.clear()
-            await message.answer(
-                f"Готово! Вы авторизованы как {full_name_from_card}.",
-                reply_markup=main_menu_keyboard(),
-            )
-            return
-
-    expected_full_name = _extract_expected_full_name(text)
-    if expected_full_name is None:
-        await message.answer(
-            "Нужно отправить запрос строго в формате '@fiitobot Имя Фамилия'."
-        )
-        return
-
-    expected_last_name, expected_first_name = expected_full_name.split(" ", maxsplit=1)
-    fiitbot_query = _build_fiitbot_query(f"{expected_first_name} {expected_last_name}")
-    await state.update_data(
-        expected_last_name=expected_last_name,
-        expected_first_name=expected_first_name,
-        fiitbot_query=fiitbot_query,
-    )
-    await state.set_state(Onboarding.wait_fiitobot_response)
-    await message.answer("Запрос принят. Теперь пришлите карточку-ответ от @fiitobot.")
+    """Backward compatibility: attempt to parse @fiitobot card even in old state."""
+    await _process_fiitobot_card(message, state, db)
 
 
 @router.message(StateFilter(Onboarding.wait_fiitobot_response))
 async def handle_fiitobot_response(message: Message, state: FSMContext, db: Database) -> None:
     """Handle copied @fiitobot response and register user."""
+    await _process_fiitobot_card(message, state, db)
+
+
+@router.message(F.text.func(lambda t: t is not None and "fiitobot" in t.casefold()))
+async def handle_card_out_of_state(message: Message, state: FSMContext, db: Database) -> None:
+    """Allow instant authorization if user sends fiitobot card without /start."""
     if message.from_user is None:
         return
 
-    text = message.text or ""
-    full_name = _extract_full_name_from_fiitobot(text)
+    # Skip if already registered.
+    users = _users_collection(db)
+    if await users.find_one({"tg_id": message.from_user.id}) is not None:
+        return
+
+    await state.set_state(Onboarding.wait_fiitobot_response)
+    await _process_fiitobot_card(message, state, db)
+
+
+async def _process_fiitobot_card(message: Message, state: FSMContext, db: Database) -> None:
+    """Parse fiitobot card, persist user, or prompt retry."""
+    if message.from_user is None:
+        return
+
+    full_name = _extract_full_name_from_fiitobot(message.text or "")
     if full_name is None:
+        await state.set_state(Onboarding.wait_fiitobot_response)
         await message.answer(
-            "Не удалось подтвердить пользователя. "
-            "Повторите запрос в @fiitobot и отправьте найденную карточку."
+            "Не удалось распознать карточку. "
+            "Скопируйте ответ от @fiitobot целиком (без изменений) и отправьте сюда."
         )
         return
-
-    data = await state.get_data()
-    expected_last_name = _normalize_name_token(str(data.get("expected_last_name") or ""))
-    expected_first_name = _normalize_name_token(str(data.get("expected_first_name") or ""))
-    actual_last_name, actual_first_name = full_name.split(" ", maxsplit=1)
-    if not _same_person(
-        expected_last_name=expected_last_name,
-        expected_first_name=expected_first_name,
-        actual_last_name=actual_last_name,
-        actual_first_name=actual_first_name,
-    ):
-        await message.answer(
-            "Полученная карточка не совпадает с введенными Имя Фамилией. "
-            "Отправьте ответ от @fiitobot именно для вашего запроса."
-        )
-        return
-
-    last_name, first_name = full_name.split(" ", maxsplit=1)
 
     await _register_user(db, tg_id=message.from_user.id, full_name=full_name)
-
     await state.clear()
     await message.answer(f"Готово! Вы авторизованы как {full_name}.", reply_markup=main_menu_keyboard())
 
@@ -133,33 +101,6 @@ async def _register_user(db: Database, *, tg_id: int, full_name: str) -> None:
         },
         upsert=True,
     )
-
-
-def _extract_expected_full_name(text: str) -> str | None:
-    """Parse user input as '@fiitobot Имя Фамилия' and normalize to 'Фамилия Имя'."""
-    normalized_text = " ".join(text.strip().split())
-    if not normalized_text:
-        return None
-
-    parts = [p for p in normalized_text.split(" ") if p]
-    if len(parts) != 3:
-        return None
-
-    handle = parts[0].casefold()
-    if handle not in {h.casefold() for h in _FIITBOT_HANDLES}:
-        return None
-
-    first_name = _normalize_name_token(parts[1])
-    last_name = _normalize_name_token(parts[2])
-    if not first_name or not last_name:
-        return None
-
-    if not _NAME_TOKEN_RE.fullmatch(last_name):
-        return None
-    if not _NAME_TOKEN_RE.fullmatch(first_name):
-        return None
-
-    return f"{last_name} {first_name}"
 
 
 def _extract_full_name_from_fiitobot(text: str) -> str | None:
@@ -193,24 +134,6 @@ def _extract_full_name_from_fiitobot(text: str) -> str | None:
 def _normalize_name_token(value: str) -> str:
     cleaned = " ".join(value.strip().split())
     return cleaned.strip(".,*_>-—")
-
-
-def _build_fiitbot_query(value: str) -> str:
-    normalized = " ".join(value.strip().split())
-    return f"@fiitobot {normalized}"
-
-
-def _same_person(
-    *,
-    expected_last_name: str,
-    expected_first_name: str,
-    actual_last_name: str,
-    actual_first_name: str,
-) -> bool:
-    return (
-        expected_last_name.casefold() == actual_last_name.casefold()
-        and expected_first_name.casefold() == actual_first_name.casefold()
-    )
 
 
 def _candidate_lines(text: str) -> list[str]:

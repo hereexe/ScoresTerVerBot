@@ -34,64 +34,35 @@ def test_start_command_new_user_prompts_full_name() -> None:
 
     asyncio.run(start_handlers.start_command(message, state, db))
 
-    assert state.state == Onboarding.full_name
-    assert message.answers[-1][0].startswith("Для авторизации отправьте запрос в формате '@fiitobot Имя Фамилия'")
-
-
-def test_handle_full_name_moves_to_waiting_fiitobot_response() -> None:
-    users = FakeCollection("users", docs=[])
-    db = FakeDB({"users": users})
-    message = FakeMessage(from_user=FakeUser(42), text="@fiitobot Елисей Яковлев")
-    state = FakeFSMContext(state=Onboarding.full_name)
-
-    asyncio.run(start_handlers.handle_full_name(message, state, db))
-
     assert state.state == Onboarding.wait_fiitobot_response
-    assert state.data["expected_last_name"] == "Яковлев"
-    assert state.data["expected_first_name"] == "Елисей"
-    assert state.data["fiitbot_query"] == "@fiitobot Елисей Яковлев"
-    assert len(message.answers) == 1
-    assert message.answers[-1][0].startswith("Запрос принят. Теперь пришлите карточку-ответ")
+    assert "Пришлите карточку" in message.answers[-1][0]
 
 
-def test_handle_full_name_normalizes_query_format() -> None:
+def test_handle_fiitobot_response_parses_card_and_upserts_user() -> None:
     users = FakeCollection("users", docs=[])
     db = FakeDB({"users": users})
-    message = FakeMessage(from_user=FakeUser(111), text="  @fiitobot   Елисей   Яковлев  ")
-    state = FakeFSMContext(state=Onboarding.full_name)
+    text = (
+        "Яковлев Елисей Евгеньевич\n"
+        "МЕН-240802\n"
+        "ФТ-202-2 (год поступления: 2024)\n"
+        "🏫 Школа: 68\n"
+    )
+    message = FakeMessage(from_user=FakeUser(77), text=text)
+    state = FakeFSMContext(state=Onboarding.wait_fiitobot_response)
 
-    asyncio.run(start_handlers.handle_full_name(message, state, db))
+    asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
 
-    assert state.state == Onboarding.wait_fiitobot_response
-    assert state.data["fiitbot_query"] == "@fiitobot Елисей Яковлев"
-    assert len(message.answers) == 1
-    assert message.answers[-1][0].startswith("Запрос принят. Теперь пришлите карточку-ответ")
-
-
-def test_handle_full_name_rejects_invalid_name() -> None:
-    users = FakeCollection("users", docs=[])
-    db = FakeDB({"users": users})
-    message = FakeMessage(from_user=FakeUser(10), text="И")
-    state = FakeFSMContext(state=Onboarding.full_name)
-
-    asyncio.run(start_handlers.handle_full_name(message, state, db))
-
-    assert state.state == Onboarding.full_name
-    assert users.docs == []
-    assert "Нужно отправить запрос строго в формате '@fiitobot Имя Фамилия'" in message.answers[-1][0]
-
-
-def test_handle_full_name_rejects_missing_fiitobot_prefix() -> None:
-    users = FakeCollection("users", docs=[])
-    db = FakeDB({"users": users})
-    message = FakeMessage(from_user=FakeUser(12), text="Елисей Яковлев")
-    state = FakeFSMContext(state=Onboarding.full_name)
-
-    asyncio.run(start_handlers.handle_full_name(message, state, db))
-
-    assert state.state == Onboarding.full_name
-    assert users.docs == []
-    assert "Нужно отправить запрос строго в формате '@fiitobot Имя Фамилия'" in message.answers[-1][0]
+    assert state.state is None
+    assert state.data == {}
+    assert message.answers[-1][0] == "Готово! Вы авторизованы как Яковлев Елисей."
+    assert any(
+        d.get("tg_id") == 77
+        and d.get("full_name") == "Яковлев Елисей"
+        and d.get("last_name") == "Яковлев"
+        and d.get("first_name") == "Елисей"
+        and d.get("verified_via") == "fiitobot"
+        for d in users.docs
+    )
 
 
 def test_handle_full_name_accepts_fiitobot_card_without_query() -> None:
@@ -121,36 +92,6 @@ def test_handle_full_name_accepts_fiitobot_card_without_query() -> None:
     )
 
 
-def test_handle_fiitobot_response_parses_card_and_upserts_user() -> None:
-    users = FakeCollection("users", docs=[])
-    db = FakeDB({"users": users})
-    text = (
-        "Яковлев Елисей Евгеньевич\n"
-        "МЕН-240802\n"
-        "ФТ-202-2 (год поступления: 2024)\n"
-        "🏫 Школа: 68\n"
-    )
-    message = FakeMessage(from_user=FakeUser(77), text=text)
-    state = FakeFSMContext(
-        state=Onboarding.wait_fiitobot_response,
-        data={"expected_last_name": "Яковлев", "expected_first_name": "Елисей"},
-    )
-
-    asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
-
-    assert state.state is None
-    assert state.data == {}
-    assert message.answers[-1][0] == "Готово! Вы авторизованы как Яковлев Елисей."
-    assert any(
-        d.get("tg_id") == 77
-        and d.get("full_name") == "Яковлев Елисей"
-        and d.get("last_name") == "Яковлев"
-        and d.get("first_name") == "Елисей"
-        and d.get("verified_via") == "fiitobot"
-        for d in users.docs
-    )
-
-
 def test_handle_fiitobot_response_rejects_not_found_response() -> None:
     users = FakeCollection("users", docs=[])
     db = FakeDB({"users": users})
@@ -159,33 +100,67 @@ def test_handle_fiitobot_response_rejects_not_found_response() -> None:
         "Не унывайте! Найдите кого-нибудь случайного /random!\n"
     )
     message = FakeMessage(from_user=FakeUser(88), text=text)
-    state = FakeFSMContext(
-        state=Onboarding.wait_fiitobot_response,
-        data={"expected_last_name": "Яковлев", "expected_first_name": "Елисей"},
-    )
+    state = FakeFSMContext(state=Onboarding.wait_fiitobot_response)
 
     asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
 
     assert state.state == Onboarding.wait_fiitobot_response
     assert users.docs == []
-    assert message.answers[-1][0].startswith("Не удалось подтвердить пользователя.")
+    assert message.answers[-1][0].startswith("Не удалось распознать карточку.")
 
 
 def test_handle_fiitobot_response_rejects_mismatch_with_entered_name() -> None:
     users = FakeCollection("users", docs=[])
     db = FakeDB({"users": users})
-    text = (
-        "Петров Иван Сергеевич\n"
-        "МЕН-240802\n"
-    )
+    text = "Петров"
     message = FakeMessage(from_user=FakeUser(89), text=text)
-    state = FakeFSMContext(
-        state=Onboarding.wait_fiitobot_response,
-        data={"expected_last_name": "Яковлев", "expected_first_name": "Елисей"},
-    )
+    state = FakeFSMContext(state=Onboarding.wait_fiitobot_response)
 
     asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
 
     assert state.state == Onboarding.wait_fiitobot_response
     assert users.docs == []
-    assert "не совпадает с введенными" in message.answers[-1][0]
+    assert "Не удалось распознать" in message.answers[-1][0]
+
+
+def test_handle_card_out_of_state_registers_user_without_start() -> None:
+    users = FakeCollection("users", docs=[])
+    db = FakeDB({"users": users})
+    text = "*via @fiitobot*\n**Иванов Иван Сергеевич**\nГруппа"
+    message = FakeMessage(from_user=FakeUser(101), text=text)
+    state = FakeFSMContext()
+
+    asyncio.run(start_handlers.handle_card_out_of_state(message, state, db))
+
+    assert state.state is None
+    assert any(d.get("tg_id") == 101 and d.get("full_name") == "Иванов Иван" for d in users.docs)
+    assert message.answers[-1][0] == "Готово! Вы авторизованы как Иванов Иван."
+
+
+def test_handle_card_out_of_state_ignores_already_registered_user() -> None:
+    users = FakeCollection("users", docs=[{"_id": new_object_id(), "tg_id": 202, "full_name": "Старый Пользователь"}])
+    db = FakeDB({"users": users})
+    text = "*via @fiitobot*\n**Новый Пользователь**"
+    message = FakeMessage(from_user=FakeUser(202), text=text)
+    state = FakeFSMContext()
+
+    asyncio.run(start_handlers.handle_card_out_of_state(message, state, db))
+
+    assert state.state is None
+    assert len(message.answers) == 0
+    # Should keep existing user untouched.
+    assert any(d.get("tg_id") == 202 and d.get("full_name") == "Старый Пользователь" for d in users.docs)
+
+
+def test_process_card_skips_lines_with_handle_and_uses_next_line() -> None:
+    users = FakeCollection("users", docs=[])
+    db = FakeDB({"users": users})
+    text = "@fiitobot Иван Иванов\n**Петров Петр Петрович**\nДанные"
+    message = FakeMessage(from_user=FakeUser(303), text=text)
+    state = FakeFSMContext(state=Onboarding.wait_fiitobot_response)
+
+    asyncio.run(start_handlers.handle_fiitobot_response(message, state, db))
+
+    assert state.state is None
+    assert any(d.get("tg_id") == 303 and d.get("full_name") == "Петров Петр" for d in users.docs)
+    assert message.answers[-1][0] == "Готово! Вы авторизованы как Петров Петр."
